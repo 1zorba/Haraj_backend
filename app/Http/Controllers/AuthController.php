@@ -176,53 +176,60 @@ public function getUsersByProfession($profession)
 public function sendJobRequest(Request $request, $worker_id)
 {
     try {
-        // 1. الحصول على صاحب العمل الذي أرسل الطلب (المستخدم الحالي)
+        // 1. الحصول على صاحب العمل (المستخدم الحالي)
         $employer = Auth::user();
 
-        // 2. إنشاء طلب العمل الجديد في قاعدة البيانات
-        // هذا هو الجزء الذي يربط كل شيء
+        // 2. إنشاء طلب العمل الجديد
         $jobRequest = JobRequest::create([
             'employer_id' => $employer->id,
-            'worker_id' => $worker_id,
-            'status' => 'pending', // الحالة الافتراضية
+            'worker_id'   => $worker_id,
+            'status'      => 'pending',
         ]);
 
-        // --- هنا يبدأ كود إرسال الإشعار (الذي يعمل بالفعل) ---
-        $credentialsPath = 'C:/Users/USER/go/config/firebase_credentials.json';
-        if (!file_exists($credentialsPath)) {
-            return response()->json(['error' => 'CRITICAL: Firebase credentials file not found.'], 500);
+        // 3. إعداد Firebase من متغير البيئة
+        $firebaseCredentials = json_decode(env('FIREBASE_CREDENTIALS'), true);
+        if (!$firebaseCredentials) {
+            return response()->json([
+                'message' => 'Job request created, but Firebase credentials not found in environment.'
+            ], 201);
         }
-        $factory = (new Factory)->withServiceAccount($credentialsPath);
+
+        $factory   = (new Factory)->withServiceAccount($firebaseCredentials);
         $messaging = $factory->createMessaging();
 
+        // 4. الحصول على العامل المستهدف
         $worker = User::find($worker_id);
         if (!$worker || !$worker->fcm_token) {
-            // حتى لو فشل الإشعار، الطلب تم إنشاؤه بنجاح
-            return response()->json(['message' => 'Job request created, but notification could not be sent.'], 201);
+            return response()->json([
+                'message' => 'Job request created, but worker has no FCM token.'
+            ], 201);
         }
 
-        // يمكنك الآن إرسال رسالة أكثر تفصيلاً
+        // 5. إرسال الإشعار
         $notificationMessage = 'لديك طلب عمل جديد من ' . $employer->name;
 
         $message = CloudMessage::withTarget('token', $worker->fcm_token)
             ->withNotification(Notification::create('طلب عمل جديد!', $notificationMessage))
-            // **مهم جدًا:** أرسل معرف الطلب مع الإشعار
-            ->withData(['job_request_id' => (string)$jobRequest->id, 'type' => 'job_request']);
+            ->withData([
+                'job_request_id' => (string)$jobRequest->id,
+                'type'           => 'job_request'
+            ]);
 
         $messaging->send($message);
-        // --- نهاية كود الإشعار ---
 
-        return response()->json(['message' => 'Job request created and notification sent successfully!'], 201);
+        return response()->json([
+            'message' => 'Job request created and notification sent successfully!',
+            'request' => $jobRequest
+        ], 201);
 
     } catch (\Throwable $e) {
         return response()->json([
-            'error' => 'An unexpected error occurred while creating the job request.',
+            'error'   => 'An unexpected error occurred while creating the job request.',
             'message' => $e->getMessage(),
-            'line' => $e->getLine(),
+            'line'    => $e->getLine(),
         ], 500);
     }
 }
-
 
  
 
@@ -306,10 +313,11 @@ public function respondToJobRequest(Request $request, $id)
 private function sendFirebaseNotification($token, $title, $body, $data = [])
 {
     try {
-        $credentialsPath = 'C:/Users/USER/go/config/firebase_credentials.json';
-        if (!file_exists($credentialsPath)) return; // فشل صامت
+        // قراءة بيانات Firebase من متغير البيئة
+        $firebaseCredentials = json_decode(env('FIREBASE_CREDENTIALS'), true);
+        if (!$firebaseCredentials) return; // فشل صامت إذا لم يوجد المتغير
 
-        $factory = (new Factory)->withServiceAccount($credentialsPath);
+        $factory = (new Factory)->withServiceAccount($firebaseCredentials);
         $messaging = $factory->createMessaging();
 
         $message = CloudMessage::withTarget('token', $token)
@@ -318,7 +326,8 @@ private function sendFirebaseNotification($token, $title, $body, $data = [])
 
         $messaging->send($message);
     } catch (\Throwable $e) {
-     }
+        \Log::error("فشل إرسال إشعار Firebase: " . $e->getMessage());
+    }
 }
 
 
