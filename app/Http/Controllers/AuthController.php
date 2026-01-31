@@ -16,61 +16,64 @@ use Illuminate\Support\Facades\Auth;
 class AuthController extends Controller
 {
  
-    public function register(Request $request)
-    {
-         $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8',
-            'phone' => 'required|string|min:8',
+   public function register(Request $request)
+{
+    // 1. التحقق من البيانات
+    $validator = Validator::make($request->all(), [
+        'name'       => 'required|string|max:255',
+        'email'      => 'required|string|email|max:255|unique:users',
+        'password'   => 'required|string|min:8',
+        'phone'      => 'required|string|min:8',
+        'image'      => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif'],
+        'role'       => 'required|string',
+        'profession' => 'nullable|string|max:255',
+        'latitude'   => 'nullable|numeric|between:-90,90',
+        'longitude'  => 'nullable|numeric|between:-180,180',
+        'address'    => 'nullable|string|max:255',
+    ]);
 
-             'image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif',],
-             'role' => 'required|string',
-            'profession' => 'nullable|string|max:255',
-
-        'latitude' => 'nullable|numeric|between:-90,90',
-        'longitude' => 'nullable|numeric|between:-180,180',
-        'address' => 'nullable|string|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json($validator->errors(), 422);
-        }
-
-        // 2. معالجة الصورة
-        $imagePath = null;
-        if ($request->hasFile('image')) {
-            $imagePath = $request->file('image')->store('images', 'public');
-        }
-
-        // 3. إنشاء المستخدم
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'phone' => $request->phone,
-            'image' => $imagePath,
-            'role' => $request->role,
-            'profession' => $request->profession,
-
-        'latitude' => $request->latitude,
-        'longitude' => $request->longitude,
-        'address' => $request->address,
-        ]);
-
-
-         try {
-            Mail::to($user->email)->send(new welcomemail());
-        } catch (\Exception $e) {
-            // لا توقف العملية إذا فشل الإيميل
-        }
-
-        // 5. إرجاع الاستجابة النهائية
-        return response()->json([
-            'message' => 'User successfully registered',
-            'user' => $user
-        ], 201);
+    if ($validator->fails()) {
+        return response()->json($validator->errors(), 422);
     }
+
+    // 2. معالجة الصورة
+    $imagePath = null;
+    $imageUrl  = null;
+    if ($request->hasFile('image')) {
+        // نخزن الصورة في storage/app/public/images
+        $imagePath = $request->file('image')->store('images', 'public');
+        // نبني رابط مباشر للصورة
+        $imageUrl  = asset('storage/' . $imagePath);
+    }
+
+    // 3. إنشاء المستخدم
+    $user = User::create([
+        'name'       => $request->name,
+        'email'      => $request->email,
+        'password'   => Hash::make($request->password),
+        'phone'      => $request->phone,
+        'image'      => $imagePath, // نخزن المسار الداخلي فقط
+        'role'       => $request->role,
+        'profession' => $request->profession,
+        'latitude'   => $request->latitude,
+        'longitude'  => $request->longitude,
+        'address'    => $request->address,
+    ]);
+
+    // 4. إرسال بريد ترحيبي (اختياري)
+    try {
+        Mail::to($user->email)->send(new welcomemail());
+    } catch (\Exception $e) {
+        // لا توقف العملية إذا فشل الإيميل
+    }
+
+    // 5. إرجاع الاستجابة النهائية
+    return response()->json([
+        'message'   => 'User successfully registered',
+        'user'      => $user,
+        'image_url' => $imageUrl // رابط الصورة المباشر
+    ], 201);
+}
 
     /**
      * دالة لتسجيل الدخول
